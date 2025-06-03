@@ -396,6 +396,9 @@ def launch_ghost_sequence():
             thread.start()
             thread_pool.append(thread)
 
+        # Start real-time status display
+        threading.Thread(target=print_status).start()
+
         if failover_monitoring:
             threading.Thread(target=monitor_target).start()
 
@@ -410,10 +413,15 @@ def launch_ghost_sequence():
         print("Invalid choice. Please select [1] or [2].")
 
 def print_status():
+    last_state = {"200": -1, "403": -1, "503": -1}
     while not stop_event.is_set():
-        print(f"✅ 200: {status_counter['200']} | 🔒 403: {status_counter['403']} | ⚠️ 503: {status_counter['503']}")
-        sys.stdout.flush()
-        time.sleep(5)
+        if (status_counter["200"] != last_state["200"] or
+            status_counter["403"] != last_state["403"] or
+            status_counter["503"] != last_state["503"]):
+            print(f"✅ 200: {status_counter['200']} | 🔒 403: {status_counter['403']} | ⚠️ 503: {status_counter['503']}")
+            sys.stdout.flush()
+            last_state.update(status_counter)
+        time.sleep(1)
 
 # Additional functions for enhanced capabilities
 
@@ -500,5 +508,4 @@ def print_banner_mini():
 # Main function to start the attack
 if __name__ == "__main__":
     print_banner_mini()
-    threading.Thread(target=print_status).start()
     launch_ghost_sequence()
