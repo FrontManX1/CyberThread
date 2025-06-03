@@ -380,8 +380,9 @@ def print_status():
 # Additional functions for enhanced capabilities
 
 def obfuscate(data):
-    return data.replace("script", "
-    return data.replace("admin", "a"+"dmin")
+    data = data.replace("script", "scr\"ipt")
+    data = data.replace("admin", "a"+"dmin")
+    return data
 
 def fetch_proxies_online():
     url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
