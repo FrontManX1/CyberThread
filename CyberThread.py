@@ -337,7 +337,7 @@ def launch_ghost_sequence():
     print(f"Session Cycle : {'Enabled' if session_cycle else 'Disabled'}")
     print(f"Delay      : {delay}s")
     print(f"Flood Method: {flood_method}")
-    print(f"Failover Monitoring : {'Enabled if failover_monitoring else 'Disabled'}")
+    print(f"Failover Monitoring : {'Enabled' if failover_monitoring else 'Disabled'}")
     print(f"Silent Mode : {'Enabled' if silent_mode else 'Disabled'}")
     print(f"Log File   : {log_file_path if log_file_path else 'None'}")
 
