@@ -340,7 +340,7 @@ def launch_ghost_sequence():
                 handle_response(response, target, rtt)
                 if session_cycle:
                     cycle_session()
-                if failover_monitoring and respons over_monitoring and response.status in [403, 429, 503]:
+                if failover_monitoring and response.status in [403, 429, 503]:
                     local_retry += 1
                     if local_retry >= max_retries:
                         stop_event.set()
