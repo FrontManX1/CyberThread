@@ -340,7 +340,8 @@ def launch_ghost_sequence():
                 handle_response(response, target, rtt)
                 if session_cycle:
                     cycle_session()
-                if failover_monitoring and response.status in [403, 429, 503]:
+                if failover_monitoring and response
+                over_monitoring and response.status in [403, 429, 503]:
                     local_retry += 1
                     if local_retry >= max_retries:
                         stop_event.set()
@@ -428,7 +429,8 @@ def print_banner_brutal():
     """)
 
 if __name__ == "__main__":
-    args = parse_args()
+    args = parse_args()  # Pastikan ini di atas semua pemanggilan argumen
+
     if args.target:
         target = args.target
         parsed_url = urlparse(target)
