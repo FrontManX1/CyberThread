@@ -434,7 +434,7 @@ if __name__ == "__main__":
         target = args.target
         parsed_url = urlparse(target)
     elif args.fire or args.stealth_force:
-        target = "https://default.target.fallback"
+        target = "https://targetlo.com"  # Ganti dengan target real
         parsed_url = urlparse(target)
     else:
         print(f"{ANSI_RED}[ERROR] --target required unless --fire or --stealth-force with fallback{ANSI_RESET}")
